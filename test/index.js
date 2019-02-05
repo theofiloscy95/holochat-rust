@@ -1,15 +1,25 @@
-// This test file uses the tape testing framework. 
-// To learn more, go here: https://github.com/substack/tape
-const test = require('tape');
-const Container = require('@holochain/holochain-nodejs');
+const path = require('path')
+const { Config, Container, Scenario } = require('@holochain/holochain-nodejs')
+Scenario.setTape(require('tape'))
 
-// instantiate an app from the DNA JSON bundle
-const app = Container.instanceFromNameAndDna("app", "dist/bundle.json")
-const app2 = Container.instanceFromNameAndDna("app2", "dist/bundle.json")
+const dnaPath = path.join(__dirname, "../dist/bundle.json")
+const dna = Config.dna(dnaPath, 'app-spec')
+const agentAlice = Config.agent("alice")
+const agentBob = Config.agent("bob")
 
-// activate the new instance
-app.start()
-app2.start()
+const instanceAlice = Config.instance(agentAlice, dna)
+const instanceBob = Config.instance(agentBob, dna)
+
+const scenario1 = new Scenario([instanceAlice], {debugLog: false})
+const scenario2 = new Scenario([instanceAlice, instanceBob])
+
+
+scenario2.runTape('agentId', async (t, { alice, bob }) => {
+  t.ok(alice.agentId)
+  t.notEqual(alice.agentId, bob.agentId)
+})
+
+
 
 const testNewChannelParams = {
   name: "test new channel",
@@ -22,67 +32,46 @@ const testMessage = {
   text : "Some text"
 }
 
-test('Can create a public channel with no other members and retrieve it', (t) => {
-  const create_result = app.call('chat', 'main', 'create_channel', testNewChannelParams)
+
+
+
+scenario1.runTape('Can create a public channel with no other members and retrieve it', async (t, {alice} ) => {
+  const create_result = await alice.callSync('chat', 'create_channel', testNewChannelParams)
   console.log(create_result)
-  t.deepEqual(create_result.address.length, 46)
+  t.notEqual(create_result.Ok, undefined)
 
-  const get_result = app.call('chat', 'main', 'get_my_channels', {})
+  const get_result = alice.call('chat', 'get_my_channels', {})
   console.log(get_result)
-  t.deepEqual(get_result.length, 1)
-
-  t.end()
+  t.deepEqual(get_result.Ok.length, 1)
 })
 
-test('Can post a message to the channel and retrieve', (t) => {
-  const create_result = app.call('chat', 'main', 'create_channel', testNewChannelParams)
+
+scenario1.runTape('Can post a message to the channel and retrieve', async (t, {alice}) => {
+  const create_result = await alice.callSync('chat', 'create_channel', testNewChannelParams)
   console.log(create_result)
-  const channel_addr = create_result.address
-  t.deepEqual(channel_addr.length, 46)
+  t.notEqual(create_result.Ok, undefined)
 
-  const get_result = app.call('chat', 'main', 'get_my_channels', {})
+  const get_result = alice.call('chat', 'get_my_channels', {})
   console.log(get_result)
-  t.deepEqual(get_result.length, 1)
+  t.deepEqual(get_result.Ok.length, 1)
 
-  const post_result = app.call('chat', 'main', 'post_message', {channel_name: testNewChannelParams.name, message: testMessage})
+  const post_result = await alice.callSync('chat', 'post_message', {channel_name: testNewChannelParams.name, message: testMessage})
   console.log(post_result)
-  t.deepEqual(post_result, {Ok: { success: true}})
+  t.notEqual(post_result.Ok, undefined)
 
-  const get_message_result = app.call('chat', 'main', 'get_messages', {channel_name: testNewChannelParams.name, min_count: 10})
+  const get_message_result = alice.call('chat', 'get_messages', {channel_name: testNewChannelParams.name, min_count: 10})
   console.log(get_message_result)
-  t.deepEqual(get_message_result[0], testMessage)
-  t.end()
+  t.deepEqual(get_message_result.Ok[0], testMessage)
 })
 
 
 
-test('scenario test create & publish post -> get from other instance', (t) => {
+// scenario2.runTape('scenario test create & publish post -> get from other instance', async (t, {alice, bob}) => {
+//   const create_result = await alice.callAsync("chat", "create_channel", testNewChannelParams)
+//   t.notEqual(create_result.Ok, undefined)
 
-  const create_result = app.call("chat", "main", "create_channel", testNewChannelParams)
-
-  t.equal(create_result.address.length, 46)
-  t.equal(create_result.address, "QmcXt9K4hYMnFELavRq6UoRb9ibbfTzjTR6q35kiqmxxWH")
-
-  const check_get_result = function check_get_result (i = 0, get_result) {
-    t.comment('checking get result for the ' + i + 'th time')
-    t.comment(get_result + "")
-
-    if (get_result) {
-      t.deepEqual(get_result, testNewChannelParams);
-      t.end()
-    }
-    else if (i < 50) {
-      setTimeout(function() {
-        check_get_result(
-          ++i,
-          app2.call("chat", "main", "get_my_channel", {channel_address:create_result.address})
-        )
-      }, 500)
-    }
-    else {
-      t.end()
-    }
-
-  }() })
+//   let get_result = await bob.callSync("chat", "get_my_channel", { channel_name: testNewChannelParams.name })
+//   t.deepEqual(get_result.Ok, testNewChannelParams);
+// })
 
 

@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use hdk::{
     self,
     entry_definition::{
@@ -5,18 +6,19 @@ use hdk::{
         ValidatingLinkDefinition,
     },
     error::{ZomeApiError, ZomeApiResult},
-    holochain_core_types::cas::content::Address,
-    holochain_core_types::dna::zome::entry_types::Sharing,
-    holochain_core_types::entry::{entry_type::EntryType, Entry},
-    holochain_core_types::error::HolochainError,
-    holochain_core_types::json::JsonString,
-    holochain_core_types::hash::HashString,
+    holochain_core_types::{
+        cas::content::Address,
+        dna::entry_types::Sharing,
+        entry::Entry,
+        error::HolochainError,
+        json::JsonString,
+        cas::content::AddressableContent,
+    },
     AGENT_ADDRESS,
 };
-use std::convert::TryFrom;
 
-use super::message;
-use super::utils;
+use crate::message;
+use crate::utils;
 
 #[derive(Serialize, Deserialize, Debug, Clone, DefaultJson)]
 pub struct Channel {
@@ -100,7 +102,7 @@ pub fn handle_create_channel(
     name: String,
     description: String,
     public: bool,
-) -> JsonString {
+) -> ZomeApiResult<()> {
     let channel = Channel {
         name,
         description,
@@ -108,104 +110,58 @@ pub fn handle_create_channel(
     };
 
     let entry = match public {
-        true => Entry::new(EntryType::App("public_channel".into()), channel),
-        false => Entry::new(EntryType::App("direct_channel".into()), channel),
+        true => Entry::App("public_channel".into(), channel.into()),
+        false => Entry::App("direct_channel".into(), channel.into()),
     };
 
-    match hdk::commit_entry(&entry) {
-        Ok(address) => match hdk::link_entries(&AGENT_ADDRESS, &address, "rooms") {
-            Ok(_) => json!({ "address": address }).into(),
-            Err(hdk_err) => hdk_err.into(),
-        },
-        Err(hdk_err) => hdk_err.into(),
-    }
+    let channel_address = hdk::commit_entry(&entry)?;
+    hdk::link_entries(&AGENT_ADDRESS, &channel_address, "rooms")?;
+    Ok(())
 }
 
-pub fn handle_get_my_channels() -> JsonString {
-    match get_my_channels() {
-        Ok(result) => result.into(),
-        Err(hdk_err) => hdk_err.into(),
-    }
+pub fn handle_post_message(channel_name: String, message: message::Message) -> ZomeApiResult<()> {
+    let channel_address = get_channel_by_name(&channel_name)?.address();
+    let message_address = hdk::commit_entry(&Entry::App("message".into(), message.into()))?;
+    hdk::link_entries(&channel_address, &message_address, "message_in")?;
+    Ok(())
 }
 
-pub fn handle_get_my_channel(channel_address : HashString) -> JsonString
-{
-    match hdk::get_entry(channel_address)
-    {
-        Ok(Some(entry)) => entry.value().to_owned(),
-        Ok(None) =>{}.into(),
-        Err(err) =>err.into()
-    }
-}
-
-
-
-
-pub fn handle_get_messages(channel_name: String) -> JsonString {
-    match get_messages(channel_name) {
-        Ok(result) => result.into(),
-        Err(hdk_err) => hdk_err.into(),
-    }
-}
-
-pub fn handle_post_message(channel_name: String, message: message::Message) -> JsonString {
-    from_channel(channel_name)
-        .map(|s| hdk::entry_address(&s))
-        .map(|channel_addr| {
-            channel_addr.and_then(|addr| {
-                hdk::commit_entry(&Entry::new(EntryType::App("message".into()), message))
-                    .and_then(|message_addr| hdk::link_entries(&addr, &message_addr, "message_in"))
-                    .map(|_| json!({"success": true}))
-            })
-        })
-        .map(|s| s.map_err(|err| json!({"err": err.to_string()}).into()))
-        .unwrap_or_else(|| Err(json!({"success": false})))
-        .into()
-}
-
-fn from_channel(channel_name: String) -> Option<Entry> {
-    get_my_channels().ok().and_then(|channels| {
-        channels
-            .iter()
-            .filter(|f| f.name == channel_name)
-            .map(|channel| match channel.public {
-                true => Entry::new(EntryType::App("public_channel".into()), channel),
-                false => Entry::new(EntryType::App("direct_channel".into()), channel),
-            })
-            .next()
+pub fn handle_get_my_channels() -> ZomeApiResult<Vec<Channel>> {
+    utils::get_links_and_load_type(&AGENT_ADDRESS, "rooms").map(|result| {
+        result.into_iter().map(|elem| elem.entry).collect()
     })
 }
 
-// end public zome functions
-
-fn get_my_channels() -> ZomeApiResult<Vec<Channel>> {
-    utils::get_links_and_load(&AGENT_ADDRESS, "rooms").map(|results| {
-        results
-            .iter()
-            .map(|get_links_result| {
-                Channel::try_from(get_links_result.entry.value().clone()).unwrap()
-            })
-            .collect()
+pub fn handle_get_messages(channel_name: String) -> ZomeApiResult<Vec<message::Message>> {
+    let channel_entry = get_channel_by_name(&channel_name)?;
+    utils::get_links_and_load_type(&channel_entry.address(), "message_in").map(|result| {
+        result.into_iter().map(|elem| elem.entry).collect()
     })
 }
 
-
-fn get_messages(channel_name: String) -> ZomeApiResult<Vec<message::Message>> {
-    match from_channel(channel_name.clone()) {
-        Some(entry) => match hdk::entry_address(&entry) {
-            Ok(address) => utils::get_links_and_load(&address, "message_in").map(|results| {
-                results
-                    .iter()
-                    .map(|get_links_result| {
-                        message::Message::try_from(get_links_result.entry.value().clone()).unwrap()
-                    })
-                    .collect()
-            }),
-            Err(hdk_err) => Err(hdk_err),
+pub fn handle_get_channel(channel_name: String) -> ZomeApiResult<Channel> {
+    let channel_entry = get_channel_by_name(&channel_name)?;
+    match channel_entry {
+        Entry::App(_, channel) => {
+            Channel::try_from(channel).map_err(|_| {
+                ZomeApiError::Internal("Entry is not a valid channel".into())
+            })
         },
-        None => Err(ZomeApiError::from(format!(
-            "Channel {} doesn't exist",
-            channel_name
-        ))),
+        _ => Err(ZomeApiError::Internal("could not get channel with that name".to_string()))
     }
 }
+
+fn get_channel_by_name(channel_name: &String) -> ZomeApiResult<Entry> {
+    let channels = handle_get_my_channels()?;
+    channels
+    .iter()
+    .filter(|f| f.name == *channel_name)
+    .map(|channel| match channel.public {
+        true => Entry::App("public_channel".into(), channel.into()),
+        false => Entry::App("direct_channel".into(), channel.into()),
+    })
+    .next()
+    .ok_or(ZomeApiError::Internal("Could not find channel with name".to_string()))
+}
+
+
