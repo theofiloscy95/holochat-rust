@@ -7,7 +7,7 @@ var call_to_api;
 function getConfiguration()
 {
   var configuration ={
-    url :'ws://localhost:3400/',
+    url :'ws://localhost:8888/',
     agent:'chat',
     instance : "test-instance",
     dna :"Qm328wyq38924y"
@@ -19,9 +19,9 @@ function getConfiguration()
 
  function getRooms() {
   var configuration = getConfiguration();
-  call_to_api(configuration.instance, "chat", "main", "get_my_channels")({
+  call_to_api(configuration.instance, "chat", "get_my_channels")({
     }).then(response => {
-      var rooms = JSON.parse(response)
+      var rooms = JSON.parse(response).Ok
       $("#rooms").empty()
       rooms = rooms.sort(function(a,b){
         if (a.name < b.name)
@@ -38,9 +38,7 @@ function getConfiguration()
           "</li>"
         )
       }
-     
-        setActiveRoom()
-      
+      setActiveRoom()
     }); 
  }
 
@@ -53,14 +51,14 @@ function getConfiguration()
 
    $("#room-name-input").val('')
   
-   call_to_api(configuration.instance, "chat", "main", "create_channel")({
+   call_to_api(configuration.instance, "chat", "create_channel")({
       name: room.name,
       description: "user generated room",
       public: room.public =="public"?true:false
     }).then(response => {
       console.log("Response is :" + response)
+      getRooms()
     })
-
 }
 
  function selectRoom(event) {
@@ -68,7 +66,7 @@ function getConfiguration()
    activeRoom = $(this).data('id')
    active_room_name = $(this).data('name')
    setActiveRoom();
-
+   getMessages();
  }
 
  function setActiveRoom() {
@@ -82,11 +80,11 @@ function getConfiguration()
 function getMessages() {
 
   var configuration = getConfiguration();
-  call_to_api(configuration.instance, "chat", "main", "get_messages")({
+  call_to_api(configuration.instance, "chat", "get_messages")({
       channel_name: active_room_name || ""
     })
     .then(response =>{
-      var messages = JSON.parse(response);
+      var messages = JSON.parse(response).Ok;
 
       if (messages.error) return;
 
@@ -108,12 +106,13 @@ function getMessages() {
  function sendMessage() {
    var text = $("#message-input").val()
    var configuration = getConfiguration();
-   call_to_api(configuration.instance, "chat", "main", "post_message")({
+   call_to_api(configuration.instance, "chat", "post_message")({
       message: {text,timestamp : new Date()},
       channel_name: active_room_name || ""
     })
     .then(response =>{
       console.log("response : +" + response) 
+      getMessages();
     })
 }
 
@@ -136,9 +135,10 @@ function getMessages() {
         if(event.keyCode == 13) $("#message-button").click()
     })
 
-    setInterval(function(){
-      getMessages();
+
+    setTimeout(function(){
       getRooms();
+      getMessages();
     },3000)
  });
 
