@@ -6,6 +6,8 @@
 
 [![Code Status](https://img.shields.io/badge/Code-Pre--Alpha-orange.svg)](https://github.com/Holochain/holochat#feature-roadmap-and-current-progress)
 
+Do not delete the Cargo.lock file! This ensures the correct versions of holochain-core are used.
+
 ***Multi-room P2P chat on Holochain**
 
 **[Code Status:](https://github.com/holochain/holochain/milestones?direction=asc&sort=completeness&state=all)** Pre-alpha. Not for production use. This application has not been audited for any security validation.
@@ -16,24 +18,24 @@
 
 2. Clone this repo:
 ```shell
-    git clone https://github.com/holochain/holochat-rust
+    git clone https://github.com/willemolding/holochat-rust
 ```
 
 3. Make sure things are working by running the tests:
 
+Install the holochain-nodejs library using the provided instructions
+
 ```shell
 cd holochat-rust
 cd test && npm install && cd ..
-hc test | test/node_modules/faucet/bin/cmd.js
+hc test
 ```
-
-Note that by using the " | test/node_modules/faucet/bin/cmd.js" you lose the `console.log` output of your tests, but gain nice color coding.
-If you want to see the logs, just use `hc test`.
 
 4. Compile the DNA and run it using `hc` with:
 
 ```shell
-hc run --port 3400 --package
+hc package --strip-meta
+hc run
 ```
 
 Finally to run the holochat UI, simply open the `ui/index.html` file in a browser, and it should start communicating with the `hc` via websockets.
